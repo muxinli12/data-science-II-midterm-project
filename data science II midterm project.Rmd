@@ -248,7 +248,7 @@ best_rmse_mars = mars_fit$results |>
 best_mse_mars = best_rmse_mars^2
 best_mse_mars
 ```
-comment: GAM  <  Ridge  <  Lasso  <  LM  <  MARS
+comment: to compare with other model we choose MSE, and find mse for MARS is 0.4948591. GAM  <  Ridge  <  Lasso  <  LM  <  MARS
 
 ## Different model MSE
 ```{r}
