@@ -1,0 +1,262 @@
+---
+title: "data science II midterm project"
+author: "Muxin Li"
+date: "2026-03-24"
+output: html_document
+---
+
+
+```{r}
+library(tidyverse)
+library(mgcv)
+library(patchwork)
+library(caret) 
+library(glmnet)
+library(earth)
+library(pdp)
+```
+
+```{r}
+load("datA.RData")
+
+datA= datA|>
+  mutate(
+    menopause = factor(menopause),
+    race = factor(race),
+    tumor_grade = factor(tumor_grade),
+    ER = factor(ER),
+    PR = factor(PR),
+    HER2 = factor(HER2),
+    stage = factor(stage),
+    surgery = factor(surgery),
+    chemo = factor(chemo),
+    hormonal_therapy = factor(hormonal_therapy)
+  )
+
+```
+
+# (a)
+## GAM model
+### step 1: choose linear terms and nonlinear terms briefly. 
+menopause, race, tumor_grade, ER, PR, HER2, stage, surgery, chemo, hormonal_therapy are categorical variables. Usually, we can treat as linear terms. age, bmi, tumor_size, lymph_nodes, Ki67 we need to find whether they are linear or nonlinear 
+```{r}
+
+p1 = ggplot(datA, aes(x= age, y= log_PFS)) + geom_point(alpha = 0.2) + geom_smooth(method="loess")
+p2 = ggplot(datA, aes(x= bmi, y= log_PFS)) + geom_point(alpha = 0.2) + geom_smooth(method="loess")
+p3 = ggplot(datA, aes(x= tumor_size, y= log_PFS)) + geom_point(alpha = 0.2) + geom_smooth(method="loess")
+p4 = ggplot(datA, aes(x= lymph_nodes, y= log_PFS)) + geom_point(alpha = 0.2) + geom_smooth(method="loess")
+p5 = ggplot(datA, aes(x= Ki67, y= log_PFS)) + geom_point(alpha = 0.2) + geom_smooth(method="loess")
+
+(p1 | p2) / (p3 | p4) / p5
+```
+comment: from the plot we find age is linear, lymph_nodes is linear,  bmi has a clear curve (first rising and then falling), tumor_size and Ki67 are slightly nonlinear
+
+
+### step 2: choose smooth term exactly.
+we are not sure tumor_size and Ki67 are smoothing terms, so we use ANOVA to compare
+```{r}
+m1 = gam(
+  log_PFS ~ age + s(bmi) + tumor_size + lymph_nodes + Ki67 + menopause + race + tumor_grade + ER + PR + HER2 + stage + surgery + chemo + hormonal_therapy,
+  data = datA
+)
+
+m2 = gam(
+  log_PFS ~ age + s(bmi) + s(tumor_size) + lymph_nodes + s(Ki67) + menopause + race + tumor_grade + ER + PR + HER2 + stage + surgery + chemo + hormonal_therapy,
+  data =datA
+)
+
+m_tumor = gam(
+  log_PFS ~ age + s(bmi) + s(tumor_size) + lymph_nodes + Ki67 +
+    menopause + race + tumor_grade + ER + PR + HER2 + stage +
+    surgery + chemo + hormonal_therapy,
+  data = datA
+)
+
+m_ki67 = gam(
+  log_PFS ~ age + s(bmi) + tumor_size + lymph_nodes + s(Ki67) +
+    menopause + race + tumor_grade + ER + PR + HER2 + stage +
+    surgery + chemo + hormonal_therapy,
+  data = datA
+)
+
+anova(m1, m2, test = "F")
+anova(m1, m_tumor, test = "F")
+anova(m1, m_ki67, test = "F")
+```
+comment: Although exploratory plots suggested mild nonlinearity for tumor_size and Ki67, model comparisons using ANOVA indicate that smoothing terms do not significantly improve model fit. In particular, the smoothing term for Ki67 has effectively zero degrees of freedom, suggesting a linear relationship. Thus, both variables are retained as linear terms.
+
+### step 3: summary the model and and simplify
+```{r}
+gam_fit1= gam(
+  log_PFS ~ age + s(bmi) + tumor_size + lymph_nodes + Ki67 +
+    menopause + race + tumor_grade + ER + PR + HER2 + stage +
+    surgery + chemo + hormonal_therapy,
+  data = datA
+)
+summary(gam_fit1)
+```
+comemnt: Ki67, menopause, race, tumor_grade2, PR, stage, surgery, chemo are not significant, so we can delect . R^2= 0.214
+
+```{r}
+gam_fit2 = gam(
+  log_PFS ~ age + s(bmi) + tumor_size + lymph_nodes + tumor_grade + ER + HER2 + hormonal_therapy,
+  data = datA
+)
+
+summary(gam_fit2)
+anova(gam_fit1,gam_fit2, test= "F")
+```
+comment: Although the reduced model has slightly higher residual deviance, the difference is not statistically significant (p = 0.5858). This suggests that the excluded variables do not contribute meaningfully to model performance. Therefore, the simpler model is preferred, achieving a better balance between model fit and complexity. We choose gam_fit2 as final gam model.
+
+```{r}
+plot(gam_fit2)
+```
+
+## LM model
+### step 1: build the LM model
+```{r}
+lm_fit= lm(
+  log_PFS ~  age + bmi + tumor_size + lymph_nodes + tumor_grade + ER + HER2 + hormonal_therapy,
+  data = datA
+)
+
+summary(lm_fit)
+```
+
+### step 2: compare with GAM model
+```{r}
+set.seed(123)
+
+folds = createFolds(datA$log_PFS, k = 10, list = TRUE)
+
+cv_mse_lm  = numeric(10)
+cv_mse_gam = numeric(10)
+
+for(i in 1:10) {
+  valid_idx = folds[[i]]
+  
+  cv_train = datA[-valid_idx, ]
+  cv_valid = datA[valid_idx, ]
+  
+  lm_cv = lm(
+    log_PFS ~ age + bmi + tumor_size + lymph_nodes +
+      tumor_grade + ER + HER2 + hormonal_therapy,
+    data = cv_train
+  )
+  
+  gam_cv = gam(
+    log_PFS ~ age + s(bmi) + tumor_size + lymph_nodes +
+      tumor_grade + ER + HER2 + hormonal_therapy,
+    data = cv_train
+  )
+  
+  pred_lm  = predict(lm_cv, newdata = cv_valid)
+  pred_gam = predict(gam_cv, newdata = cv_valid)
+  
+  cv_mse_lm[i]  = mean((cv_valid$log_PFS - pred_lm)^2)
+  cv_mse_gam[i] = mean((cv_valid$log_PFS - pred_gam)^2)
+}
+
+mse_lm= mean(cv_mse_lm)
+mse_lm
+mse_gam= mean(cv_mse_gam)
+mse_gam
+```
+comment: Under 10-fold cross-validation, the GAM model achieved a slightly lower mean squared error (0.486) compared to the linear model (0.493), indicating improved predictive performance. This suggests that modeling bmi with a nonlinear smooth term provides a modest benefit.
+
+## Penalized Regression Model 
+### step 1: find the x and y
+```{r}
+x = model.matrix(
+  log_PFS ~ age + bmi + tumor_size + lymph_nodes + Ki67 +
+    menopause + race + tumor_grade + ER + PR + HER2 +
+    stage + surgery + chemo + hormonal_therapy,
+  data = datA
+)[, -1]
+
+y = datA$log_PFS
+```
+
+### step 2: build Lasso and Ridge
+```{r}
+set.seed(123)
+
+cv_lasso= cv.glmnet(x, y, alpha = 1)
+
+plot(cv_lasso)
+
+cv_lasso$lambda.min
+
+```
+
+```{r}
+cv_ridge = cv.glmnet(x, y, alpha = 0)
+
+plot(cv_ridge)
+```
+
+### step 3: compare with other model
+```{r}
+pred_lasso = predict(cv_lasso, x, s = "lambda.min")
+pred_ridge = predict(cv_ridge, x, s = "lambda.min")
+
+mse_lasso = mean((y - pred_lasso)^2)
+mse_ridge = mean((y - pred_ridge)^2)
+
+mse_lasso
+mse_ridge
+```
+comment: Among the penalized regression models, Ridge achieved a slightly lower MSE (0.487) than Lasso (0.488), indicating marginally better predictive performance. For mse: GAM  <  Ridge  <  Lasso  <  LM
+
+## MARS Model
+### step 1: find the best model 
+```{r}
+ctrl1 = trainControl(method = "cv", number = 10)
+
+mars_grid = expand.grid(
+  degree = 1:3,
+  nprune = 2:15
+)
+
+set.seed(123)
+
+mars_fit = train(
+  log_PFS ~ age + bmi + tumor_size + lymph_nodes + Ki67 + menopause + race + tumor_grade + ER + PR + HER2 + stage + surgery + chemo + hormonal_therapy,
+  data = datA,
+  method = "earth",
+  tuneGrid = mars_grid,
+  trControl = ctrl1
+)
+
+ggplot(mars_fit)
+
+mars_fit$bestTune
+
+coef(mars_fit$finalModel)
+```
+comment: The optimal MARS model has degree = 1, indicating that no interaction terms are needed and the model is additive. And the best model has 11 basis functions
+
+### step 2 : get mse to compare with other model
+```{r}
+best_rmse_mars = mars_fit$results |>
+  dplyr::filter(
+    nprune == mars_fit$bestTune$nprune,
+    degree == mars_fit$bestTune$degree
+  ) |>
+  dplyr::pull(RMSE)
+
+best_mse_mars = best_rmse_mars^2
+best_mse_mars
+```
+comment: GAM  <  Ridge  <  Lasso  <  LM  <  MARS
+
+## Different model MSE
+```{r}
+model_mse = data.frame(
+  Model = c("LM", "GAM", "Ridge", "Lasso", "MARS"),
+  MSE = c(mse_lm, mse_gam, mse_ridge, mse_lasso, best_mse_mars))|>
+  arrange(MSE)
+
+model_mse
+```
+comment: In this analysis, the generalized additive model (GAM) achieved the lowest mean squared error, indicating that modeling smooth nonlinear relationships—particularly for BMI—provides the greatest improvement in prediction accuracy. Ridge and Lasso regression offered modest improvements over the linear model by stabilizing coefficients and performing variable selection, but their gains were limited. In contrast, the MARS model, which captures nonlinearity through piecewise linear functions, performed worse than the GAM, suggesting that the underlying relationships are smooth rather than threshold-based.
