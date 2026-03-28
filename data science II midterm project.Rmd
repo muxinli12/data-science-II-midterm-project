@@ -260,3 +260,200 @@ model_mse = data.frame(
 model_mse
 ```
 comment: In this analysis, the generalized additive model (GAM) achieved the lowest mean squared error, indicating that modeling smooth nonlinear relationships—particularly for BMI—provides the greatest improvement in prediction accuracy. Ridge and Lasso regression offered modest improvements over the linear model by stabilizing coefficients and performing variable selection, but their gains were limited. In contrast, the MARS model, which captures nonlinearity through piecewise linear functions, performed worse than the GAM, suggesting that the underlying relationships are smooth rather than threshold-based.
+
+
+Q2
+```{r}
+load("datB.RData")
+```
+
+```{r}
+datB = datB |>
+  mutate(across(c(menopause, race, tumor_grade, ER, PR, HER2, 
+                  stage, surgery, chemo, hormonal_therapy), factor))
+
+# External Validation: Apply Model A to Data B
+pred_B_ext = predict(gam_fit2, newdata = datB)
+
+mse_ext = mean((datB$log_PFS - pred_B_ext)^2)
+rmse_ext = sqrt(mse_ext)
+r2_ext = cor(datB$log_PFS, pred_B_ext)^2
+
+# Internal Validation: Build New Model for Data B
+# Using the same GAM structure to ensure comparability
+gam_fit_B = gam(
+  log_PFS ~ age + s(bmi) + tumor_size + lymph_nodes + tumor_grade + 
+    ER + HER2 + hormonal_therapy,
+  data = datB
+)
+
+summary_B = summary(gam_fit_B)
+r2_B = summary_B$r.sq
+
+# Comparison Table
+mse_comparison = data.frame(
+  `Data Set` = c("Data A", "Data B"),
+  MSE = c(best_mse_mars, mse_ext))
+coef_A = as.data.frame(summary(gam_fit2)$p.coeff)
+coef_B = as.data.frame(summary_B$p.coeff)
+comparison_coefs = cbind(coef_A, coef_B)
+colnames(comparison_coefs) = c("Beta_1990s", "Beta_2000s")
+print(mse_comparison)
+print(comparison_coefs)
+cat("R Square:", r2_B)
+```
+The model does not generalize well. While the model still captures the general direction of most clinical risks, the significant increase in error and the dramatic shift in specific biological predictors (like HER2) suggest that a model trained on 1990s "medical reality" is no longer calibrated for the 2000s.
+
+
+### Assessment of Generalization
+The prediction model built on the 1990–1995 cohort (**datA**) performs poorly when applied to the 2000–2005 cohort (**datB**). We justify this conclusion based on three key metrics:
+
+* **Increased Error:** The Mean Squared Error (MSE) rose from approximately **0.486** (during internal cross-validation) to **0.7058** in the external validation. This represents a nearly **45% increase in prediction error**.
+* **Reduced Explanatory Power:** The $R^2$ dropped from **0.214** to **0.1676**, indicating that the 1990s model explains significantly less variance in the PFS of the 2000s patients.
+* **Coefficient Instability:** Several key coefficients shifted dramatically in magnitude and direction (see Table 1 in Appendix), proving that the "rules" governing breast cancer progression changed over that decade.
+
+### Changes in Prediction?
+By comparing the 1990s coefficients ($\beta_{1990s}$) with the newly trained 2000s coefficients ($\beta_{2000s}$), we can identify several critical shifts in breast cancer research and treatment:
+
+#### **The "HER2 Revolution"**
+The most striking change is the **HER2 status**. In the 1990s, HER2-positive status was a strong negative prognostic factor ($\beta = -0.1749$). However, in the 2000s model, the coefficient flipped to slightly positive ($\beta = 0.0365$). 
+ **Clinical Interpretation:** This shift is almost certainly due to the clinical introduction of **Trastuzumab (Herceptin)** in the late 1990s. HER2-positive patients, who previously had the worst outcomes, began receiving targeted therapy that effectively neutralized the biological risk of the HER2 protein, fundamentally altering the survival landscape.
+
+#### **Management of Nodal Disease**
+The negative impact of **Lymph Node** involvement significantly decreased, with the coefficient moving from **-0.0632** to **-0.0314**.
+ **Clinical Interpretation:** This suggests that systemic treatments (chemotherapy and newer targeted agents) in the early 2000s became more effective at treating micrometastatic disease, making the presence of positive lymph nodes less of a "death sentence" for PFS than it was a decade prior.
+
+#### **Potency of Hormonal Therapy**
+The protective effect of **Hormonal Therapy** increased from **0.1366** to **0.2144**.
+**Clinical Interpretation:** This likely reflects the transition from Tamoxifen as the sole standard of care to the widespread use of **Aromatase Inhibitors (AIs)** (e.g., Letrozole, Anastrozole) for post-menopausal women, which clinical trials proved to be more effective at preventing recurrence.
+
+#### **Baseline Survival Improvement (The Intercept)**
+The model **Intercept** increased from **2.616** to **2.987**.
+**Clinical Interpretation:** This "baseline" jump indicates a general improvement in progression-free survival across the board, likely due to better diagnostic imaging, earlier detection, and improved supportive care (e.g., managing treatment side effects).
+
+
+```{r}
+p1_b = ggplot(datB, aes(x = age, y = log_PFS)) + geom_point(alpha = 0.2) + geom_smooth(method="loess")
+p2_b = ggplot(datB, aes(x = bmi, y = log_PFS)) + geom_point(alpha = 0.2) + geom_smooth(method="loess")
+p3_b = ggplot(datB, aes(x = tumor_size, y = log_PFS)) + geom_point(alpha = 0.2) + geom_smooth(method="loess")
+p4_b = ggplot(datB, aes(x = lymph_nodes, y = log_PFS)) + geom_point(alpha = 0.2) + geom_smooth(method="loess")
+p5_b = ggplot(datB, aes(x = Ki67, y = log_PFS)) + geom_point(alpha = 0.2) + geom_smooth(method="loess")
+
+(p1_b | p2_b) / (p3_b | p4_b) / p5_b
+```
+```{r}
+m1_b = gam(log_PFS ~ age + s(bmi) + tumor_size + lymph_nodes + Ki67 + menopause + race + 
+             tumor_grade + ER + PR + HER2 + stage + surgery + chemo + hormonal_therapy, data = datB)
+
+m2_b = gam(log_PFS ~ age + s(bmi) + s(tumor_size) + lymph_nodes + s(Ki67) + menopause + race + 
+             tumor_grade + ER + PR + HER2 + stage + surgery + chemo + hormonal_therapy, data = datB)
+
+anova(m1_b, m2_b, test = "F")
+```
+
+```{r}
+gam_fit_B = gam(
+  log_PFS ~ age + s(bmi) + tumor_size + lymph_nodes + tumor_grade + ER + HER2 + hormonal_therapy,
+  data = datB
+)
+
+summary(gam_fit_B)
+```
+
+```{r}
+set.seed(123)
+folds_b = createFolds(datB$log_PFS, k = 10, list = TRUE)
+
+cv_mse_lm_b  = numeric(10)
+cv_mse_gam_b = numeric(10)
+
+for(i in 1:10) {
+  valid_idx = folds_b[[i]]
+  train_b = datB[-valid_idx, ]
+  test_b = datB[valid_idx, ]
+  
+  # LM
+  lm_b = lm(log_PFS ~ age + bmi + tumor_size + lymph_nodes + tumor_grade + ER + HER2 + hormonal_therapy, data = train_b)
+  # GAM
+  gam_b = gam(log_PFS ~ age + s(bmi) + tumor_size + lymph_nodes + tumor_grade + ER + HER2 + hormonal_therapy, data = train_b)
+  
+  cv_mse_lm_b[i]  = mean((test_b$log_PFS - predict(lm_b, test_b))^2)
+  cv_mse_gam_b[i] = mean((test_b$log_PFS - predict(gam_b, test_b))^2)
+}
+
+mse_lm_b = mean(cv_mse_lm_b)
+print(mse_lm_b)
+mse_gam_b = mean(cv_mse_gam_b)
+print(mse_gam_b)
+```
+
+```{r}
+x_b = model.matrix(log_PFS ~ age + bmi + tumor_size + lymph_nodes + Ki67 + menopause + race + 
+                     tumor_grade + ER + PR + HER2 + stage + surgery + chemo + hormonal_therapy, data = datB)[, -1]
+y_b = datB$log_PFS
+
+# Ridge & Lasso
+cv_lasso_b = cv.glmnet(x_b, y_b, alpha = 1)
+cv_ridge_b = cv.glmnet(x_b, y_b, alpha = 0)
+
+# MARS
+mars_fit_b = train(
+  log_PFS ~ age + bmi + tumor_size + lymph_nodes + Ki67 + menopause + race + 
+    tumor_grade + ER + PR + HER2 + stage + surgery + chemo + hormonal_therapy,
+  data = datB, method = "earth", tuneGrid = mars_grid, trControl = ctrl1
+)
+```
+
+```{r}
+pred_lasso = predict(cv_lasso_b, x_b, s = "lambda.min")
+pred_ridge = predict(cv_ridge_b, x_b, s = "lambda.min")
+
+mse_lasso_b = mean((y_b - pred_lasso)^2)
+mse_ridge_b = mean((y_b - pred_ridge)^2)
+
+mse_lasso_b
+mse_ridge_b
+
+best_mse_mars_b = (mars_fit_b$results |> 
+  filter(nprune == mars_fit_b$bestTune$nprune, degree == mars_fit_b$bestTune$degree) |>
+  pull(RMSE))^2
+best_mse_mars_b
+```
+
+```{r}
+model_mse_b = data.frame(
+  Model = c("LM", "GAM", "Ridge", "Lasso", "MARS"),
+  MSE = c(mse_lm_b, mse_gam_b, mse_ridge_b, mse_lasso_b, best_mse_mars_b)) |>
+    arrange(MSE)
+
+print(model_mse_b)
+```
+
+Choose Lasso Regression, which has the best performance.
+
+```{r}
+coef_A = as.matrix(coef(cv_lasso, s = "lambda.min"))
+coef_B = as.matrix(coef(cv_lasso_b, s = "lambda.min"))
+
+lasso_comparison = data.frame(
+  Predictor = rownames(coef_A),
+  Beta_1990s = round(coef_A[, 1], 4),
+  Beta_2000s = round(coef_B[, 1], 4)
+)  |> 
+  filter(Beta_1990s != 0 | Beta_2000s != 0) |>
+  mutate(Status = case_when(
+    Beta_1990s != 0 & Beta_2000s == 0 ~ "Dropped in 2000s",
+    Beta_1990s == 0 & Beta_2000s != 0 ~ "New in 2000s",
+    TRUE ~ "Kept in both"
+  ))
+
+print(lasso_comparison)
+```
+
+Significant Improvement in Baseline Survival: The model intercept increased substantially from 2.572 to 3.162. This jump indicates that, while controlling for all other clinical covariates (such as age and tumor characteristics), patients in the 2000s cohort exhibited a markedly higher baseline $log(PFS)$ compared to those in the 1990s. 
+
+Diminishing Impact of Nodal Metastasis: The coefficient for lymph_nodes narrowed from -0.0597 to -0.0290. While positive lymph node involvement remains a negative prognostic indicator, its relative impact on disease progression was reduced by approximately 50% in the later cohort. 
+
+Emergence of New Metabolic and Physiological Predictors: Variables such as bmi and menopause1 (menopausal status), which were excluded from the 1990s model via Lasso regularization (coefficients reduced to zero), emerged as significant predictors in the 2000s model. The inclusion of bmi ($-0.0045$) and menopause1 ($-0.0242$) suggests a shift in the clinical landscape where metabolic health and hormonal status have become more critical in determining long-term outcomes.
+
+Reversal of Demographic Prognostic Factors: Most notably, the coefficient for race4 (Hispanic) shifted from a negative indicator (-0.0132) to a positive protective factor (+0.0855). This reversal suggests a fundamental change in the survival outcomes for this demographic, which may be attributed to improved health equity, better access to specialized care, or enhanced therapeutic responses to updated treatment protocols during this decade.
