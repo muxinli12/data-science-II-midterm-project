@@ -1,12 +1,12 @@
 ---
 title: "data science II midterm project"
-author: "Muxin Li"
+author: "Muxin Li, Xinyi Yao, Yumeng Lu"
 date: "2026-03-24"
 output: html_document
 ---
 
 
-```{r}
+```{r message=FALSE}
 library(tidyverse)
 library(mgcv)
 library(patchwork)
@@ -15,6 +15,29 @@ library(glmnet)
 library(earth)
 library(pdp)
 ```
+
+```{r}
+theme_set(
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14, hjust = 0.5),
+    legend.position = "bottom"
+  )
+)
+
+plot_labs = list(
+  geom_point(alpha = 0.2),
+  geom_smooth(method = "loess", se = TRUE),
+  labs(x = NULL, y = "log(PFS)")
+)
+
+pretty_table = function(df, caption = NULL) {
+  knitr::kable(df, caption = caption, align = "c") |>
+    kableExtra::kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover", "condensed"))
+}
+```
+
+# (I)
 
 ```{r}
 load("datA.RData")
@@ -35,25 +58,26 @@ datA= datA|>
 
 ```
 
-# (a)
 ## GAM model
-### step 1: choose linear terms and nonlinear terms briefly. 
-menopause, race, tumor_grade, ER, PR, HER2, stage, surgery, chemo, hormonal_therapy are categorical variables. Usually, we can treat as linear terms. age, bmi, tumor_size, lymph_nodes, Ki67 we need to find whether they are linear or nonlinear 
+### Step 1: choose linear terms and nonlinear terms briefly. 
+Menopause, race, tumor_grade, ER, PR, HER2, stage, surgery, chemo, hormonal_therapy are categorical variables. Usually, we can treat as linear terms. For age, bmi, tumor_size, lymph_nodes, and Ki67, we need to find whether they are linear or nonlinear.
 ```{r}
 
-p1 = ggplot(datA, aes(x= age, y= log_PFS)) + geom_point(alpha = 0.2) + geom_smooth(method="loess")
-p2 = ggplot(datA, aes(x= bmi, y= log_PFS)) + geom_point(alpha = 0.2) + geom_smooth(method="loess")
-p3 = ggplot(datA, aes(x= tumor_size, y= log_PFS)) + geom_point(alpha = 0.2) + geom_smooth(method="loess")
-p4 = ggplot(datA, aes(x= lymph_nodes, y= log_PFS)) + geom_point(alpha = 0.2) + geom_smooth(method="loess")
-p5 = ggplot(datA, aes(x= Ki67, y= log_PFS)) + geom_point(alpha = 0.2) + geom_smooth(method="loess")
+p1 = ggplot(datA, aes(x= age, y= log_PFS)) + plot_labs + labs(title = "Age")
+p2 = ggplot(datA, aes(x= bmi, y= log_PFS)) + plot_labs + labs(title = "BMI")
+p3 = ggplot(datA, aes(x= tumor_size, y= log_PFS)) + plot_labs + labs(title = "Tumor Size")
+p4 = ggplot(datA, aes(x= lymph_nodes, y= log_PFS)) + plot_labs + labs(title = "Lymph Nodes")
+p5 = ggplot(datA, aes(x= Ki67, y= log_PFS)) + plot_labs + labs(title = "Ki67")
 
-(p1 | p2) / (p3 | p4) / p5
+(p1 | p2) / (p3 | p4) / p5 +
+  plot_annotation(title = "Plots for Selecting Linear and Nonlinear Terms in Data A")
 ```
-comment: from the plot we find age is linear, lymph_nodes is linear,  bmi has a clear curve (first rising and then falling), tumor_size and Ki67 are slightly nonlinear
+
+Comment: From the plot we find age is linear; lymph_nodes is linear; bmi has a clear curve (first rising and then falling); tumor_size and Ki67 are slightly nonlinear.
 
 
-### step 2: choose smooth term exactly.
-we are not sure tumor_size and Ki67 are smoothing terms, so we use ANOVA to compare
+### Step 2: choose smooth term exactly.
+We are not sure tumor_size and Ki67 are smoothing terms, so we use ANOVA to compare.
 ```{r}
 m1 = gam(
   log_PFS ~ age + s(bmi) + tumor_size + lymph_nodes + Ki67 + menopause + race + tumor_grade + ER + PR + HER2 + stage + surgery + chemo + hormonal_therapy,
@@ -83,9 +107,9 @@ anova(m1, m2, test = "F")
 anova(m1, m_tumor, test = "F")
 anova(m1, m_ki67, test = "F")
 ```
-comment: Although exploratory plots suggested mild nonlinearity for tumor_size and Ki67, model comparisons using ANOVA indicate that smoothing terms do not significantly improve model fit. In particular, the smoothing term for Ki67 has effectively zero degrees of freedom, suggesting a linear relationship. Thus, both variables are retained as linear terms.
+Comment: Although exploratory plots suggested mild nonlinearity for tumor_size and Ki67, model comparisons using ANOVA indicate that smoothing terms do not significantly improve model fit. In particular, the smoothing term for Ki67 has effectively zero degrees of freedom, suggesting a linear relationship. Thus, both variables are retained as linear terms.
 
-### step 3: summary the model and and simplify
+### Step 3: summary the model and simplify.
 ```{r}
 gam_fit1= gam(
   log_PFS ~ age + s(bmi) + tumor_size + lymph_nodes + Ki67 +
@@ -95,7 +119,7 @@ gam_fit1= gam(
 )
 summary(gam_fit1)
 ```
-comemnt: Ki67, menopause, race, tumor_grade2, PR, stage, surgery, chemo are not significant, so we can delect . R^2= 0.214
+Comment: Ki67, menopause, race, tumor_grade2, PR, stage, surgery, chemo are not statistically significant and could be excluded from the model. The model explained 21.3% of the variability of the outcome (R^2= 0.213).
 
 ```{r}
 gam_fit2 = gam(
@@ -106,14 +130,15 @@ gam_fit2 = gam(
 summary(gam_fit2)
 anova(gam_fit1,gam_fit2, test= "F")
 ```
-comment: Although the reduced model has slightly higher residual deviance, the difference is not statistically significant (p = 0.5858). This suggests that the excluded variables do not contribute meaningfully to model performance. Therefore, the simpler model is preferred, achieving a better balance between model fit and complexity. We choose gam_fit2 as final gam model.
+Comment: Although the reduced model has slightly higher residual deviance, the difference is not statistically significant (p = 0.5858). This suggests that the excluded variables do not contribute meaningfully to model performance. Therefore, the simpler model is preferred, achieving a better balance between model fit and complexity. We choose gam_fit2 as final gam model.
 
 ```{r}
 plot(gam_fit2)
+title("Estimated Smooth Effect of BMI in the Final GAM for Data A")
 ```
 
 ## LM model
-### step 1: build the LM model
+### Step 1: build the LM model
 ```{r}
 lm_fit= lm(
   log_PFS ~  age + bmi + tumor_size + lymph_nodes + tumor_grade + ER + HER2 + hormonal_therapy,
@@ -123,7 +148,7 @@ lm_fit= lm(
 summary(lm_fit)
 ```
 
-### step 2: compare with GAM model
+### Step 2: compare with GAM model
 ```{r}
 set.seed(123)
 
@@ -162,10 +187,10 @@ mse_lm
 mse_gam= mean(cv_mse_gam)
 mse_gam
 ```
-comment: Under 10-fold cross-validation, the GAM model achieved a slightly lower mean squared error (0.486) compared to the linear model (0.493), indicating improved predictive performance. This suggests that modeling bmi with a nonlinear smooth term provides a modest benefit.
+Comment: Under 10-fold cross-validation, the GAM model achieved a slightly lower mean squared error (0.486) compared to the linear model (0.493), indicating improved predictive performance. This suggests that modeling bmi with a nonlinear smooth term provides a modest benefit.
 
 ## Penalized Regression Model 
-### step 1: find the x and y
+### Step 1: find the x and y
 ```{r}
 x = model.matrix(
   log_PFS ~ age + bmi + tumor_size + lymph_nodes + Ki67 +
@@ -177,13 +202,14 @@ x = model.matrix(
 y = datA$log_PFS
 ```
 
-### step 2: build Lasso and Ridge
+### Step 2: build Lasso and Ridge
 ```{r}
 set.seed(123)
 
 cv_lasso= cv.glmnet(x, y, alpha = 1)
 
 plot(cv_lasso)
+title("Lasso Cross-Validation Curve", line = 3)
 
 cv_lasso$lambda.min
 
@@ -193,9 +219,10 @@ cv_lasso$lambda.min
 cv_ridge = cv.glmnet(x, y, alpha = 0)
 
 plot(cv_ridge)
+title("Ridge Cross-Validation Curve", line = 3)
 ```
 
-### step 3: compare with other model
+### Step 3: compare with other model
 ```{r}
 pred_lasso = predict(cv_lasso, x, s = "lambda.min")
 pred_ridge = predict(cv_ridge, x, s = "lambda.min")
@@ -206,10 +233,10 @@ mse_ridge = mean((y - pred_ridge)^2)
 mse_lasso
 mse_ridge
 ```
-comment: Among the penalized regression models, Ridge achieved a slightly lower MSE (0.487) than Lasso (0.488), indicating marginally better predictive performance. For mse: GAM  <  Ridge  <  Lasso  <  LM
+Comment: Among the penalized regression models, Ridge achieved a slightly lower MSE (0.487) than Lasso (0.488), indicating marginally better predictive performance. For mse: GAM  <  Ridge  <  Lasso  <  LM.
 
 ## MARS Model
-### step 1: find the best model 
+### Step 1: find the best model 
 ```{r}
 ctrl1 = trainControl(method = "cv", number = 10)
 
@@ -228,15 +255,16 @@ mars_fit = train(
   trControl = ctrl1
 )
 
-ggplot(mars_fit)
+ggplot(mars_fit) +
+  labs(title = "MARS Cross-Validation Performance")
 
 mars_fit$bestTune
 
 coef(mars_fit$finalModel)
 ```
-comment: The optimal MARS model has degree = 1, indicating that no interaction terms are needed and the model is additive. And the best model has 11 basis functions
+Comment: The optimal MARS model has degree = 1, indicating that no interaction terms are needed and the model is additive. The best model has 11 basis functions.
 
-### step 2 : get mse to compare with other model
+### Step 2 : get mse to compare with other model
 ```{r}
 best_rmse_mars = mars_fit$results |>
   dplyr::filter(
@@ -248,21 +276,22 @@ best_rmse_mars = mars_fit$results |>
 best_mse_mars = best_rmse_mars^2
 best_mse_mars
 ```
-comment: to compare with other model we choose MSE, and find mse for MARS is 0.4948591. GAM  <  Ridge  <  Lasso  <  LM  <  MARS
+Comment: To compare with other model, we choose MSE. We find MSE for MARS is 0.4948591.
 
 ## Different model MSE
 ```{r}
-model_mse = data.frame(
+model_mse_a = data.frame(
   Model = c("LM", "GAM", "Ridge", "Lasso", "MARS"),
   MSE = c(mse_lm, mse_gam, mse_ridge, mse_lasso, best_mse_mars))|>
   arrange(MSE)
 
-model_mse
+pretty_table(model_mse_a, caption = "Model Comparison by MSE for Data A")
 ```
-comment: In this analysis, the generalized additive model (GAM) achieved the lowest mean squared error, indicating that modeling smooth nonlinear relationships—particularly for BMI—provides the greatest improvement in prediction accuracy. Ridge and Lasso regression offered modest improvements over the linear model by stabilizing coefficients and performing variable selection, but their gains were limited. In contrast, the MARS model, which captures nonlinearity through piecewise linear functions, performed worse than the GAM, suggesting that the underlying relationships are smooth rather than threshold-based.
+Comment: For MSE comparison among five different models, GAM  <  Ridge  <  Lasso  <  LM  <  MARS. In this analysis, the generalized additive model (GAM) achieved the lowest mean squared error, indicating that modeling smooth nonlinear relationships—particularly for BMI—provides the greatest improvement in prediction accuracy. Ridge and Lasso regression offered modest improvements over the linear model by stabilizing coefficients and performing variable selection, but their gains were limited. In contrast, the MARS model, which captures nonlinearity through piecewise linear functions, performed worse than the GAM, suggesting that the underlying relationships are smooth rather than threshold-based.
 
 
-Q2
+# (II)
+## Evaluate prediction model on dataset B
 ```{r}
 load("datB.RData")
 ```
@@ -298,8 +327,9 @@ coef_A = as.data.frame(summary(gam_fit2)$p.coeff)
 coef_B = as.data.frame(summary_B$p.coeff)
 comparison_coefs = cbind(coef_A, coef_B)
 colnames(comparison_coefs) = c("Beta_1990s", "Beta_2000s")
-print(mse_comparison)
-print(comparison_coefs)
+
+pretty_table(mse_comparison, caption = "External Validation MSE Comparison")
+pretty_table(comparison_coefs, caption = "Coefficient Comparison Between Data A and Data B")
 cat("R Square:", r2_B)
 ```
 The model does not generalize well. While the model still captures the general direction of most clinical risks, the significant increase in error and the dramatic shift in specific biological predictors (like HER2) suggest that a model trained on 1990s "medical reality" is no longer calibrated for the 2000s.
@@ -312,35 +342,46 @@ The prediction model built on the 1990–1995 cohort (**datA**) performs poorly 
 * **Reduced Explanatory Power:** The $R^2$ dropped from **0.214** to **0.1676**, indicating that the 1990s model explains significantly less variance in the PFS of the 2000s patients.
 * **Coefficient Instability:** Several key coefficients shifted dramatically in magnitude and direction (see Table 1 in Appendix), proving that the "rules" governing breast cancer progression changed over that decade.
 
-### Changes in Prediction?
+### Changes in Prediction
 By comparing the 1990s coefficients ($\beta_{1990s}$) with the newly trained 2000s coefficients ($\beta_{2000s}$), we can identify several critical shifts in breast cancer research and treatment:
 
-#### **The "HER2 Revolution"**
+* **The "HER2 Revolution"**
 The most striking change is the **HER2 status**. In the 1990s, HER2-positive status was a strong negative prognostic factor ($\beta = -0.1749$). However, in the 2000s model, the coefficient flipped to slightly positive ($\beta = 0.0365$). 
+
  **Clinical Interpretation:** This shift is almost certainly due to the clinical introduction of **Trastuzumab (Herceptin)** in the late 1990s. HER2-positive patients, who previously had the worst outcomes, began receiving targeted therapy that effectively neutralized the biological risk of the HER2 protein, fundamentally altering the survival landscape.
 
-#### **Management of Nodal Disease**
+* **Management of Nodal Disease**
 The negative impact of **Lymph Node** involvement significantly decreased, with the coefficient moving from **-0.0632** to **-0.0314**.
+
  **Clinical Interpretation:** This suggests that systemic treatments (chemotherapy and newer targeted agents) in the early 2000s became more effective at treating micrometastatic disease, making the presence of positive lymph nodes less of a "death sentence" for PFS than it was a decade prior.
 
-#### **Potency of Hormonal Therapy**
+* **Potency of Hormonal Therapy**
 The protective effect of **Hormonal Therapy** increased from **0.1366** to **0.2144**.
+
 **Clinical Interpretation:** This likely reflects the transition from Tamoxifen as the sole standard of care to the widespread use of **Aromatase Inhibitors (AIs)** (e.g., Letrozole, Anastrozole) for post-menopausal women, which clinical trials proved to be more effective at preventing recurrence.
 
-#### **Baseline Survival Improvement (The Intercept)**
+* **Baseline Survival Improvement (The Intercept)**
 The model **Intercept** increased from **2.616** to **2.987**.
+
 **Clinical Interpretation:** This "baseline" jump indicates a general improvement in progression-free survival across the board, likely due to better diagnostic imaging, earlier detection, and improved supportive care (e.g., managing treatment side effects).
 
+## Build a New Prediction model for the 2000-2005 cohort.
+### Choose linear terms and nonlinear terms
 
 ```{r}
-p1_b = ggplot(datB, aes(x = age, y = log_PFS)) + geom_point(alpha = 0.2) + geom_smooth(method="loess")
-p2_b = ggplot(datB, aes(x = bmi, y = log_PFS)) + geom_point(alpha = 0.2) + geom_smooth(method="loess")
-p3_b = ggplot(datB, aes(x = tumor_size, y = log_PFS)) + geom_point(alpha = 0.2) + geom_smooth(method="loess")
-p4_b = ggplot(datB, aes(x = lymph_nodes, y = log_PFS)) + geom_point(alpha = 0.2) + geom_smooth(method="loess")
-p5_b = ggplot(datB, aes(x = Ki67, y = log_PFS)) + geom_point(alpha = 0.2) + geom_smooth(method="loess")
+p1_b = ggplot(datB, aes(x = age, y = log_PFS)) + plot_labs + labs(title = "Age")
+p2_b = ggplot(datB, aes(x = bmi, y = log_PFS)) + plot_labs + labs(title = "BMI")
+p3_b = ggplot(datB, aes(x = tumor_size, y = log_PFS)) + plot_labs + labs(title = "Tumor Size")
+p4_b = ggplot(datB, aes(x = lymph_nodes, y = log_PFS)) + plot_labs + labs(title = "Lymph Nodes")
+p5_b = ggplot(datB, aes(x = Ki67, y = log_PFS)) + plot_labs + labs(title = "Ki67")
 
-(p1_b | p2_b) / (p3_b | p4_b) / p5_b
+(p1_b | p2_b) / (p3_b | p4_b) / p5_b +
+  plot_annotation(title = "Plots for Selecting Linear and Nonlinear Terms in Data B")
+
 ```
+
+### Build GAM model
+
 ```{r}
 m1_b = gam(log_PFS ~ age + s(bmi) + tumor_size + lymph_nodes + Ki67 + menopause + race + 
              tumor_grade + ER + PR + HER2 + stage + surgery + chemo + hormonal_therapy, data = datB)
@@ -351,6 +392,8 @@ m2_b = gam(log_PFS ~ age + s(bmi) + s(tumor_size) + lymph_nodes + s(Ki67) + meno
 anova(m1_b, m2_b, test = "F")
 ```
 
+### Summary the model
+
 ```{r}
 gam_fit_B = gam(
   log_PFS ~ age + s(bmi) + tumor_size + lymph_nodes + tumor_grade + ER + HER2 + hormonal_therapy,
@@ -359,6 +402,8 @@ gam_fit_B = gam(
 
 summary(gam_fit_B)
 ```
+
+### Compare GAM and LM models
 
 ```{r}
 set.seed(123)
@@ -387,6 +432,8 @@ mse_gam_b = mean(cv_mse_gam_b)
 print(mse_gam_b)
 ```
 
+### Build Ridge, LASSO, and MARS models
+
 ```{r}
 x_b = model.matrix(log_PFS ~ age + bmi + tumor_size + lymph_nodes + Ki67 + menopause + race + 
                      tumor_grade + ER + PR + HER2 + stage + surgery + chemo + hormonal_therapy, data = datB)[, -1]
@@ -404,6 +451,8 @@ mars_fit_b = train(
 )
 ```
 
+### Compare models
+
 ```{r}
 pred_lasso = predict(cv_lasso_b, x_b, s = "lambda.min")
 pred_ridge = predict(cv_ridge_b, x_b, s = "lambda.min")
@@ -417,6 +466,7 @@ mse_ridge_b
 best_mse_mars_b = (mars_fit_b$results |> 
   filter(nprune == mars_fit_b$bestTune$nprune, degree == mars_fit_b$bestTune$degree) |>
   pull(RMSE))^2
+
 best_mse_mars_b
 ```
 
@@ -426,10 +476,10 @@ model_mse_b = data.frame(
   MSE = c(mse_lm_b, mse_gam_b, mse_ridge_b, mse_lasso_b, best_mse_mars_b)) |>
     arrange(MSE)
 
-print(model_mse_b)
+pretty_table(model_mse_b, caption = "Model Comparison by MSE for Data B")
 ```
 
-Choose Lasso Regression, which has the best performance.
+Comment: Lasso model achieved the lowest mean squared error, indicating the best performance, so we choose Lasso Regression.
 
 ```{r}
 coef_A = as.matrix(coef(cv_lasso, s = "lambda.min"))
@@ -447,13 +497,15 @@ lasso_comparison = data.frame(
     TRUE ~ "Kept in both"
   ))
 
-print(lasso_comparison)
+pretty_table(lasso_comparison, caption = "Lasso Coefficient Comparison Across Cohorts")
 ```
+
+Comment:
 
 Significant Improvement in Baseline Survival: The model intercept increased substantially from 2.572 to 3.162. This jump indicates that, while controlling for all other clinical covariates (such as age and tumor characteristics), patients in the 2000s cohort exhibited a markedly higher baseline $log(PFS)$ compared to those in the 1990s. 
 
 Diminishing Impact of Nodal Metastasis: The coefficient for lymph_nodes narrowed from -0.0597 to -0.0290. While positive lymph node involvement remains a negative prognostic indicator, its relative impact on disease progression was reduced by approximately 50% in the later cohort. 
 
-Emergence of New Metabolic and Physiological Predictors: Variables such as bmi and menopause1 (menopausal status), which were excluded from the 1990s model via Lasso regularization (coefficients reduced to zero), emerged as significant predictors in the 2000s model. The inclusion of bmi ($-0.0045$) and menopause1 ($-0.0242$) suggests a shift in the clinical landscape where metabolic health and hormonal status have become more critical in determining long-term outcomes.
+Emergence of New Metabolic and Physiological Predictors: Variables such as bmi and menopause1 (menopausal status), which were excluded from the 1990s model via Lasso regularization (coefficients reduced to zero), emerged as significant predictors in the 2000s model. The inclusion of bmi (-0.0045) and menopause1 (-0.0242) suggests a shift in the clinical landscape where metabolic health and hormonal status have become more critical in determining long-term outcomes.
 
 Reversal of Demographic Prognostic Factors: Most notably, the coefficient for race4 (Hispanic) shifted from a negative indicator (-0.0132) to a positive protective factor (+0.0855). This reversal suggests a fundamental change in the survival outcomes for this demographic, which may be attributed to improved health equity, better access to specialized care, or enhanced therapeutic responses to updated treatment protocols during this decade.
